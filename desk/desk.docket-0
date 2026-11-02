@@ -1,9 +1,9 @@
-:~  title+'chibi'
-    info+'Live on-chain activity for Remilia collections: Milady and Remilio sales, loans and transfers.'
+:~  title+'Chibi'
+    info+'Live on-chain activity for Remilia collections (Milady, Remilio, Radbro, Schizo, YAYO): sales with prices, Blend loans, transfers, and which Urbit IDs are trading.'
     color+0x10.0e14
-    image+'/apps/chibi/icon'
-    version+[0 1 0]
-    website+'https://github.com/itsTylerIRL'
+    image+'https://raw.githubusercontent.com/itsTylerIRL/chibi/main/desk/web/icon.png'
+    version+[1 0 0]
+    website+'https://github.com/itsTylerIRL/chibi'
     license+'MIT'
     base+'chibi'
     site+/apps/chibi
