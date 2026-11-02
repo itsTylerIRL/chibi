@@ -50,6 +50,9 @@ function save(k, v) { try { localStorage.setItem('remimon.' + k, v); } catch {} 
 // ---------------------------------------------------------------- formatting
 
 const collName = (c) => c === 'all' ? 'All collections' : (S?.collections.find((x) => x.key === c)?.name) || c;
+// shorter names where space is tight (header pills, All-view tiles)
+const SHORT = { schizo: 'Schizo' };
+const shortName = (c) => SHORT[c] || collName(c);
 const collAddr = (c) => S?.collections.find((x) => x.key === c)?.addr;
 const fmtEth = (e) => e >= 100 ? e.toFixed(0) : e >= 10 ? e.toFixed(1) : e >= 1 ? e.toFixed(2) : e.toFixed(3);
 const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
@@ -190,7 +193,7 @@ function renderColls() {
   if (coll !== 'all' && !S.collections.some((c) => c.key === coll)) coll = 'all';
   $('colls').innerHTML = `<button data-c="all" class="all ${coll === 'all' ? 'on' : ''}">All</button>` + S.collections.map((c) => {
     const last = sales.filter((s) => s.coll === c.key).at(-1);
-    return `<button data-c="${c.key}" class="${c.key === coll ? 'on' : ''}"><img ${last ? imgAttr(c.key, last.id) : 'src=""'} alt="">${esc(c.name)}</button>`;
+    return `<button data-c="${c.key}" class="${c.key === coll ? 'on' : ''}"><img ${last ? imgAttr(c.key, last.id) : 'src=""'} alt="">${esc(shortName(c.key))}</button>`;
   }).join('');
   $('alertrule').hidden = coll === 'all';
   $('alerthint').hidden = coll !== 'all';
@@ -230,7 +233,7 @@ function renderAllStats() {
       const cs = sales.filter((s) => s.coll === c.key);
       const c1 = cs.filter((s) => s.at > now - D), c7 = cs.filter((s) => s.at > now - 7 * D);
       const last = cs.at(-1);
-      return `<div class="tile ctile" data-c="${c.key}"><div class="k"><i style="background:${collColor(c.key)}"></i>${esc(c.name)}</div>
+      return `<div class="tile ctile" data-c="${c.key}"><div class="k"><i style="background:${collColor(c.key)}"></i>${esc(shortName(c.key))}</div>
         <div class="v">${c7.length ? fmtEth(median(c7.map((s) => s.eth))) : '—'} <small>ETH</small></div>
         <div class="s" title="7-day median sale · sales in the last 24h">median · ${c1.length} today</div></div>`;
     }).join('');
