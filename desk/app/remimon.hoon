@@ -1,4 +1,4 @@
-::  remimon: watches remilia nft collections on ethereum.
+::  remimon: watches remilia-adjacent nft collections on ethereum.
 ::
 ::    polls a public json-rpc node over iris. every Transfer of a
 ::    watched collection is pulled with its transaction receipt, and
@@ -70,6 +70,9 @@
   ^-  (list [key=@tas name=@t addr=@ux])
   :~  [%milady 'Milady' 0x5af0.d982.7e0c.53e4.799b.b226.655a.1de1.52a4.25a5]
       [%remilio 'Remilio' 0xd3d9.ddd0.cf0a.5f0b.fb8f.7fce.ae07.5df6.87ea.ebab]
+      [%radbro 'Radbro' 0xabcd.b571.0b88.f456.fed1.e990.2537.9e29.69f2.9610]
+      [%schizo 'SchizoPosters' 0xbfe4.7d6d.4090.940d.1c7a.0066.b63d.2387.5e3e.2ac5]
+      [%yayo 'YAYO' 0x9f6.6a09.4a00.70eb.ddef.a192.a33f.a5d7.5b59.d46b]
   ==
 ++  transfer-topic  '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 ++  seaports
@@ -678,7 +681,7 @@
       %+  turn  collections
       |=  [k=@tas n=@t a=@ux]
       (pairs ~[key+s+k name+s+n addr+s+(hexs 40 a)])
-      acts+a+(turn (scag 400 acts) act-json)
+      acts+a+(turn (scag 1.200 acts) act-json)
       :-  %sales
       :-  %a
       %+  turn

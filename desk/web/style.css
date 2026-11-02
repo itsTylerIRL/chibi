@@ -33,6 +33,11 @@ h2 { margin: 0; font: 600 12px var(--mono); text-transform: uppercase; letter-sp
 .colls button { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; font-weight: 600; }
 .colls button img { width: 26px; height: 26px; border-radius: 50%; background: var(--panel2); object-fit: cover; }
 .colls button.on { border-color: var(--yellow); color: var(--yellow); }
+.colls button.all { padding: 4px 14px; }
+.colls { overflow-x: auto; max-width: 100%; }
+.tile.ctile { cursor: pointer; }
+.tile.ctile:hover { border-color: var(--faint); }
+.tile .k i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .search { flex: 1; max-width: 340px; display: flex; }
 .search input { flex: 1; }
 .sync { margin-left: auto; font: 12px var(--mono); color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }

@@ -8,7 +8,15 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const IMG = {
   milady: (id) => `https://www.miladymaker.net/milady/${id}.png`,
   remilio: (id) => `https://remilio.org/remilio/${id}.png`,
+  radbro: (id) => `https://radbro.xyz/api/tokens/images/${id}.png`,
+  yayo: (id) => `https://yayo.fund/yayo_nft/${id}.png`,
 };
+// collections whose image URL isn't derivable from the id: read it from the token metadata once
+const META = {
+  schizo: (id) => `https://schizoposters.xyz/api/tokens/metadata/${id}`,
+};
+// one color per collection, in this fixed order (dataviz validator: all checks pass on the dark panel)
+const COLL_COLORS = ['#2f95bd', '#d45a90', '#b08a00', '#8a6fd6', '#3fa66b'];
 const VENUE = {
   'OpenSea': { c: 'var(--v-opensea)', label: 'OpenSea listing' },
   'OpenSea offer': { c: 'var(--v-opensea)', label: 'OpenSea offer', ring: true },
@@ -30,7 +38,7 @@ const A = (r) => ({ hash: r[0], coll: r[1], id: r[2], from: r[3], to: r[4], kind
 
 let S = null;               // last /state
 let acts = [], sales = [];  // decoded
-let coll = load('coll', 'milady');
+let coll = load('coll', 'all');
 let range = +load('range', 7);
 let kind = load('kind', 'all');
 let settings = { watch: [], below: {} };
@@ -41,7 +49,7 @@ function save(k, v) { try { localStorage.setItem('remimon.' + k, v); } catch {} 
 
 // ---------------------------------------------------------------- formatting
 
-const collName = (c) => (S?.collections.find((x) => x.key === c)?.name) || c;
+const collName = (c) => c === 'all' ? 'All collections' : (S?.collections.find((x) => x.key === c)?.name) || c;
 const collAddr = (c) => S?.collections.find((x) => x.key === c)?.addr;
 const fmtEth = (e) => e >= 100 ? e.toFixed(0) : e >= 10 ? e.toFixed(1) : e >= 1 ? e.toFixed(2) : e.toFixed(3);
 const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
@@ -65,7 +73,33 @@ function who(addr) {
   if (KNOWN[addr]) return `<span class="who" data-addr="${addr}" title="${addr}">${KNOWN[addr]}</span>`;
   return `<span class="who" data-addr="${addr}">${short(addr)}</span>`;
 }
-const img = (c, id) => IMG[c] ? IMG[c](id) : '';
+const imgCache = {}, imgPending = new Set();
+function img(c, id) {
+  if (IMG[c]) return IMG[c](id);
+  const k = c + ':' + id;
+  if (imgCache[k]) return imgCache[k];
+  const v = load('img.' + k, null);
+  if (v) return (imgCache[k] = v);
+  resolveImg(c, id);
+  return '';
+}
+const ipfs = (u) => {
+  const m = u.match(/^https:\/\/([a-z0-9]+)\.ipfs\.[^/]+\/(.*)$/) || u.match(/^ipfs:\/\/(?:ipfs\/)?([^/]+)\/?(.*)$/);
+  return m ? `https://ipfs.filebase.io/ipfs/${m[1]}/${m[2]}` : u;
+};
+async function resolveImg(c, id) {
+  const k = c + ':' + id;
+  if (!META[c] || imgPending.has(k) || imgPending.size > 40) return;
+  imgPending.add(k);
+  try {
+    const j = await (await fetch(META[c](id))).json();
+    const u = ipfs(j.image || '');
+    if (u) { imgCache[k] = u; save('img.' + k, u); document.querySelectorAll(`img[data-img="${k}"]`).forEach((e) => { e.src = u; }); }
+  } catch {}
+  imgPending.delete(k);
+}
+const imgAttr = (c, id) => `src="${img(c, id)}" data-img="${c}:${id}"`;
+const collColor = (c) => COLL_COLORS[Math.max(0, (S?.collections || []).findIndex((x) => x.key === c)) % COLL_COLORS.length];
 
 // ---------------------------------------------------------------- data
 
@@ -118,7 +152,7 @@ function parseWatch(q) {
   if (/^0x[0-9a-fA-F]{40}$/.test(q)) return { t: 'addr', a: q.toLowerCase() };
   if (/^~[a-z-]+$/.test(q)) return { t: 'ship', p: q };
   const m = q.match(/^#?(\d{1,5})$/);
-  if (m) return { t: 'token', c: coll, id: +m[1] };
+  if (m) return coll === 'all' ? null : { t: 'token', c: coll, id: +m[1] };
   return null;
 }
 const watchKey = (w) => JSON.stringify(w);
@@ -153,10 +187,13 @@ function renderSync() {
 }
 
 function renderColls() {
-  $('colls').innerHTML = S.collections.map((c) => {
+  if (coll !== 'all' && !S.collections.some((c) => c.key === coll)) coll = 'all';
+  $('colls').innerHTML = `<button data-c="all" class="all ${coll === 'all' ? 'on' : ''}">All</button>` + S.collections.map((c) => {
     const last = sales.filter((s) => s.coll === c.key).at(-1);
-    return `<button data-c="${c.key}" class="${c.key === coll ? 'on' : ''}"><img src="${last ? img(c.key, last.id) : ''}" alt="">${esc(c.name)}</button>`;
+    return `<button data-c="${c.key}" class="${c.key === coll ? 'on' : ''}"><img ${last ? imgAttr(c.key, last.id) : 'src=""'} alt="">${esc(c.name)}</button>`;
   }).join('');
+  $('alertrule').hidden = coll === 'all';
+  $('alerthint').hidden = coll !== 'all';
   $('alertcoll').textContent = collName(coll);
   const b = settings.below[coll];
   if (document.activeElement !== $('below')) $('below').value = b || '';
@@ -165,6 +202,7 @@ function renderColls() {
 function median(xs) { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
 
 function renderStats() {
+  if (coll === 'all') return renderAllStats();
   const now = Date.now(), D = 86400e3;
   const cs = sales.filter((s) => s.coll === coll);
   const in1 = cs.filter((s) => s.at > now - D), in7 = cs.filter((s) => s.at > now - 7 * D), in30 = cs.filter((s) => s.at > now - 30 * D);
@@ -174,7 +212,7 @@ function renderStats() {
   const low = in1.length ? Math.min(...in1.map((s) => s.eth)) : null;
   const tile = (k, v, s) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
   $('stats').innerHTML =
-    (last ? `<div class="tile last" data-tok="${last.id}"><img src="${img(coll, last.id)}" alt=""><div style="min-width:0"><div class="k">Last sale</div><div class="v">${fmtEth(last.eth)} <small>ETH</small></div><div class="s">#${last.id} · ${esc(last.venue)} · ${ago(last.at)} ago</div></div></div>`
+    (last ? `<div class="tile last" data-tok="${last.id}"><img ${imgAttr(coll, last.id)} alt=""><div style="min-width:0"><div class="k">Last sale</div><div class="v">${fmtEth(last.eth)} <small>ETH</small></div><div class="s">#${last.id} · ${esc(last.venue)} · ${ago(last.at)} ago</div></div></div>`
       : tile('Last sale', '—', 'none in the window yet')) +
     tile('Low sale · 24h', low == null ? '—' : `${fmtEth(low)} <small>ETH</small>`, 'a floor estimate from sales') +
     tile('Median · 7d', in7.length ? `${fmtEth(median(in7.map((s) => s.eth)))} <small>ETH</small>` : '—', `${in7.length} sales`) +
@@ -183,10 +221,26 @@ function renderStats() {
     tile('Volume · 30d', `${fmtEth(vol(in30))} <small>ETH</small>`, `${in30.length} sales`);
 }
 
+function renderAllStats() {
+  const now = Date.now(), D = 86400e3;
+  const vol = (xs) => xs.reduce((t, s) => t + s.eth, 0);
+  const in1 = sales.filter((s) => s.at > now - D), in7 = sales.filter((s) => s.at > now - 7 * D);
+  $('stats').innerHTML = `<div class="tile"><div class="k">All · 24h</div><div class="v">${fmtEth(vol(in1))} <small>ETH</small></div><div class="s">${in1.length} sales · ${fmtEth(vol(in7))} ETH this week</div></div>` +
+    S.collections.map((c) => {
+      const cs = sales.filter((s) => s.coll === c.key);
+      const c1 = cs.filter((s) => s.at > now - D), c7 = cs.filter((s) => s.at > now - 7 * D);
+      const last = cs.at(-1);
+      return `<div class="tile ctile" data-c="${c.key}"><div class="k"><i style="background:${collColor(c.key)}"></i>${esc(c.name)}</div>
+        <div class="v">${c7.length ? fmtEth(median(c7.map((s) => s.eth))) : '—'} <small>ETH</small></div>
+        <div class="s" title="7-day median sale · sales in the last 24h">median · ${c1.length} today</div></div>`;
+    }).join('');
+}
+
 // ---------------------------------------------------------------- chart
 
 let pts = [];
 function renderChart() {
+  if (coll === 'all') return renderVolume();
   const svg = $('svg'), box = $('chart').getBoundingClientRect();
   const W = box.width, H = box.height;
   $('charttitle').textContent = `${collName(coll)} sales`;
@@ -231,6 +285,62 @@ function renderChart() {
   const clipped = cs.filter((s) => s.eth > hi || s.eth < lo).length;
   $('chartnote').textContent = `${cs.length} sales${clipped ? ` · ${clipped} outlier${clipped > 1 ? 's' : ''} pinned to the edge` : ''} · prices include marketplace fees · click a dot for the token`;
 }
+// all collections: volume per day (per hour on 24h), stacked by collection
+let bars = [];
+function renderVolume() {
+  const svg = $('svg'), box = $('chart').getBoundingClientRect();
+  const W = box.width, H = box.height;
+  document.querySelectorAll('#ranges button').forEach((b) => b.classList.toggle('on', +b.dataset.r === range));
+  const hourly = range <= 1, step = hourly ? 3600e3 : 86400e3;
+  $('charttitle').textContent = `Volume per ${hourly ? 'hour' : 'day'}`;
+  const end = hourly ? Math.ceil(Date.now() / step) * step : (() => { const d = new Date(); d.setHours(24, 0, 0, 0); return +d; })();
+  const n = hourly ? 24 : range;
+  const start = end - n * step;
+  const keys = S.collections.map((c) => c.key);
+  const bins = Array.from({ length: n }, (_, i) => ({ t: start + i * step, v: Object.fromEntries(keys.map((k) => [k, 0])), c: Object.fromEntries(keys.map((k) => [k, 0])) }));
+  for (const s of sales) { const i = Math.floor((s.at - start) / step); if (i >= 0 && i < n && s.coll in bins[i].v) { bins[i].v[s.coll] += s.eth; bins[i].c[s.coll]++; } }
+  const tot = (b) => keys.reduce((t, k) => t + b.v[k], 0);
+  const max = Math.max(0.0001, ...bins.map(tot));
+  $('legend').innerHTML = S.collections.map((c) => `<span><i style="background:${collColor(c.key)}"></i>${esc(c.name)}</span>`).join('');
+  const L = 52, R = 10, T = 8, B = 22;
+  const ticks = niceTicks(0, max * 1.05, 4), hi = Math.max(max * 1.05, ticks.at(-1));
+  const y = (v) => T + (1 - v / hi) * (H - T - B);
+  const bw = (W - L - R) / n, gap = Math.min(6, bw * 0.25);
+  let g = `<g class="grid">${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`).join('')}</g><g class="axis">`;
+  g += ticks.map((v) => `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${fmtEth(v)}</text>`).join('');
+  const every = Math.ceil(n / Math.max(2, Math.floor((W - L) / 70)));
+  bins.forEach((b, i) => { if (i % every === 0) g += `<text x="${L + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle">${hourly ? new Date(b.t).toLocaleTimeString(undefined, { hour: 'numeric' }) : new Date(b.t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</text>`; });
+  g += `<text x="${L - 8}" y="${T}" text-anchor="end" dy="-2" opacity=".7">ETH</text></g>`;
+  bars = [];
+  bins.forEach((b, i) => {
+    let acc = 0; const x0 = L + i * bw + gap / 2, w = Math.max(1, bw - gap);
+    keys.forEach((k) => {
+      if (!b.v[k]) return;
+      const y1 = y(acc), y2 = y(acc + b.v[k]); acc += b.v[k];
+      const h = Math.max(1, y1 - y2 - 2);   // 2px surface gap between stacked segments
+      g += `<rect x="${x0.toFixed(1)}" y="${(y1 - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(3, w / 4)}" fill="${collColor(k)}"/>`;
+    });
+    bars.push({ b, x0, w, top: y(acc) });
+  });
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = g;
+  pts = [];
+  const total = bins.reduce((t, b) => t + tot(b), 0);
+  $('chartnote').textContent = `${fmtEth(total)} ETH across ${bins.reduce((t, b) => t + keys.reduce((u, k) => u + b.c[k], 0), 0)} sales · hover a bar for the split · pick a collection for its price chart`;
+}
+function volTip(ev) {
+  const r = $('chart').getBoundingClientRect(), mx = ev.clientX - r.left;
+  const bar = bars.find((b) => mx >= b.x0 - 2 && mx <= b.x0 + b.w + 2);
+  const tip = $('tip');
+  if (!bar) { tip.hidden = true; return; }
+  const { b } = bar, hourly = range <= 1;
+  const lines = S.collections.filter((c) => b.c[c.key]).map((c) => `<span style="display:flex;gap:6px;align-items:center"><i style="width:8px;height:8px;border-radius:50%;background:${collColor(c.key)}"></i>${esc(c.name)} <b style="font-size:12px;margin-left:auto;padding-left:10px">${fmtEth(b.v[c.key])}</b><span style="color:var(--muted)">· ${b.c[c.key]}</span></span>`);
+  tip.innerHTML = `<div><b>${hourly ? new Date(b.t).toLocaleString(undefined, { weekday: 'short', hour: 'numeric' }) : new Date(b.t).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</b><br>${lines.join('') || '<span style="color:var(--muted)">no sales</span>'}</div>`;
+  tip.hidden = false;
+  tip.style.left = Math.min(r.width - tip.offsetWidth, Math.max(0, bar.x0 + bar.w + 8)) + 'px';
+  tip.style.top = Math.max(0, bar.top - 20) + 'px';
+}
+
 function niceTicks(lo, hi, n) {
   const span = hi - lo, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0) || mag * 10;
@@ -244,6 +354,7 @@ function nearest(ev) {
   return { best, mx, r };
 }
 $('chart').addEventListener('mousemove', (ev) => {
+  if (coll === 'all') return volTip(ev);
   const { best, r } = nearest(ev);
   const tip = $('tip'), cross = $('cross');
   document.querySelectorAll('#svg circle.hot').forEach((c) => c.classList.remove('hot'));
@@ -251,7 +362,7 @@ $('chart').addEventListener('mousemove', (ev) => {
   const s = best.s;
   document.querySelector(`#svg circle[data-i="${pts.indexOf(best)}"]`)?.classList.add('hot');
   cross.setAttribute('x1', best.x); cross.setAttribute('x2', best.x); cross.setAttribute('visibility', 'visible');
-  tip.innerHTML = `<img src="${img(s.coll, s.id)}" alt=""><div><b>${fmtEth(s.eth)} ETH</b><br>${esc(collName(s.coll))} #${s.id}<br><span style="color:var(--muted)">${esc((VENUE[s.venue] || {}).label || s.venue)} · ${when(s.at)}</span></div>`;
+  tip.innerHTML = `<img ${imgAttr(s.coll, s.id)} alt=""><div><b>${fmtEth(s.eth)} ETH</b><br>${esc(collName(s.coll))} #${s.id}<br><span style="color:var(--muted)">${esc((VENUE[s.venue] || {}).label || s.venue)} · ${when(s.at)}</span></div>`;
   tip.hidden = false;
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   tip.style.left = Math.min(r.width - tw, Math.max(0, best.x + 12)) + 'px';
@@ -273,7 +384,7 @@ function row(a) {
   else if (a.kind === 'seize') l2 = `seized by ${who(a.to)}`;
   else l2 = `${who(a.from)} → ${who(a.to)}`;
   return `<div class="row${watched(a) ? ' watched' : ''}">
-    <img class="t" loading="lazy" src="${img(a.coll, a.id)}" alt="" data-tok="${a.id}" data-c="${a.coll}">
+    <img class="t" loading="lazy" ${imgAttr(a.coll, a.id)} alt="" data-tok="${a.id}" data-c="${a.coll}">
     <div style="min-width:0"><div class="l1"><span class="nm" data-tok="${a.id}" data-c="${a.coll}">${esc(collName(a.coll))} #${a.id}</span><span class="badge ${a.kind}">${k}</span>${a.venue && a.kind === 'sale' ? `<span class="note">${esc(a.venue)}</span>` : ''}</div>
     <div class="l2">${l2}</div></div>
     <div class="r">${price}<span class="when"><a href="https://etherscan.io/tx/${a.hash}" target="_blank" rel="noopener" title="${when(a.at)}">${ago(a.at)} ↗</a></span></div>
@@ -281,7 +392,7 @@ function row(a) {
 }
 function renderFeed() {
   document.querySelectorAll('#kinds button').forEach((b) => b.classList.toggle('on', b.dataset.k === kind));
-  let xs = acts.filter((a) => a.coll === coll);
+  let xs = coll === 'all' ? acts : acts.filter((a) => a.coll === coll);
   if (kind === 'sale') xs = xs.filter((a) => a.kind === 'sale');
   else if (kind === 'loan') xs = xs.filter((a) => ['loan', 'repay', 'seize'].includes(a.kind));
   else if (kind === 'move') xs = xs.filter((a) => ['move', 'mint', 'burn'].includes(a.kind));
@@ -335,7 +446,7 @@ function closeDrawer() { $('drawer').hidden = true; }
 async function openToken(c, id) {
   const w = { t: 'token', c, id };
   const addr = collAddr(c);
-  const head = () => `<div class="dhead"><img src="${img(c, id)}" alt=""><div><h3 id="dtitle">${esc(collName(c))} #${id}</h3>
+  const head = () => `<div class="dhead"><img ${imgAttr(c, id)} alt=""><div><h3 id="dtitle">${esc(collName(c))} #${id}</h3>
     <button data-watch='${JSON.stringify(w)}'>${isWatched(w) ? '★ Watching' : '☆ Watch'}</button>
     <div class="links"><a href="https://opensea.io/assets/ethereum/${addr}/${id}" target="_blank" rel="noopener">OpenSea ↗</a><a href="https://blur.io/eth/asset/${addr}/${id}" target="_blank" rel="noopener">Blur ↗</a><a href="https://etherscan.io/nft/${addr}/${id}" target="_blank" rel="noopener">Etherscan ↗</a></div></div></div>`;
   openDrawer(head() + `<div class="empty">Loading history…</div>`);
@@ -344,6 +455,15 @@ async function openToken(c, id) {
   const owner = hist[0]?.to;
   openDrawer(head() + `<div class="dstats"><div><b>${ss.length ? fmtEth(ss[0].eth) + ' Ξ' : '—'}</b>last sale</div><div><b>${ss.length}</b>sales seen</div><div><b>${owner ? who(owner) : '—'}</b>latest holder</div></div>
     <h2 style="margin:6px 0 6px">History</h2><div class="feed">${hist.length ? hist.map(row).join('') : '<div class="empty">No activity in the synced window.</div>'}</div>`);
+}
+
+async function openTokenAll(id) {
+  openDrawer(`<h3 id="dtitle" class="mono">#${id} in every collection</h3><div class="empty">Loading…</div>`);
+  const hist = await find(String(id));
+  const cs = S.collections.filter((c) => hist.some((a) => a.coll === c.key));
+  openDrawer(`<h3 id="dtitle" class="mono" style="margin:0 0 6px">#${id} in every collection</h3>
+    <div class="note" style="margin-bottom:12px">Open one: ${S.collections.map((c) => `<a href="#" data-tok="${id}" data-c="${c.key}">${esc(c.name)}</a>`).join(' · ')}</div>
+    <div class="feed">${hist.length ? hist.map(row).join('') : '<div class="empty">No activity for that id in the synced window.</div>'}</div>`);
 }
 
 async function openAddr(addr) {
@@ -389,12 +509,12 @@ $('search').onsubmit = (e) => {
   e.preventDefault();
   const w = parseWatch($('q').value);
   if (!w) return;
-  if (w.t === 'token') openToken(coll, w.id); else if (w.t === 'ship') openShip(w.p); else openAddr(w.a);
+  if (w.t === 'token') coll === 'all' ? openTokenAll(w.id) : openToken(coll, w.id); else if (w.t === 'ship') openShip(w.p); else openAddr(w.a);
 };
 $('watchform').onsubmit = (e) => {
   e.preventDefault();
   const w = parseWatch($('watchin').value);
-  if (!w) { $('watchin').select(); return; }
+  if (!w) { if (coll === 'all' && /^#?\d+$/.test($('watchin').value.trim())) $('watchin').placeholder = 'pick a collection to watch a token'; $('watchin').select(); return; }
   if (!isWatched(w)) toggleWatch(w);
   $('watchin').value = '';
 };
