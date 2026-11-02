@@ -1,10 +1,10 @@
-:~  title+'remimon'
+:~  title+'chibi'
     info+'Live on-chain activity for Remilia collections: Milady and Remilio sales, loans and transfers.'
     color+0x10.0e14
-    image+'/apps/remimon/icon'
+    image+'/apps/chibi/icon'
     version+[0 1 0]
     website+'https://github.com/itsTylerIRL'
     license+'MIT'
-    base+'remimon'
-    site+/apps/remimon
+    base+'chibi'
+    site+/apps/chibi
 ==

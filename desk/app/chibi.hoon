@@ -1,4 +1,4 @@
-::  remimon: watches remilia-adjacent nft collections on ethereum.
+::  chibi: watches remilia-adjacent nft collections on ethereum.
 ::
 ::    polls a public json-rpc node over iris. every Transfer of a
 ::    watched collection is pulled with its transaction receipt, and
@@ -8,7 +8,7 @@
 ::      blur v2  Execution721*Packed   price packed into the event
 ::      blend    LoanOfferTaken/Repay  nft-backed loans, not sales
 ::
-::    owner-only json api under /apps/remimon/api:
+::    owner-only json api under /apps/chibi/api:
 ::
 ::      GET   /state          sync status, latest activity, all sales, @p names
 ::      GET   /find?q=        activity for a token id, 0x address or ~ship
@@ -23,7 +23,7 @@
   ==
 +$  job  [coll=@tas hash=@ux block=@ud at=@da]
 +$  elog  [addr=@ux idx=@ud topics=(list @ux) data=(list @)]
-+$  versioned-state  $%(state-0)
++$  versioned-state  $%(state-0 state-1)
 +$  state-0
   $:  %0
       head=(map @tas @ud)              ::  last block scanned, per collection
@@ -39,6 +39,27 @@
       unchecked=(set @ux)
       settings=(unit @t)
       error=@t
+  ==
+::  state-1: user controls, so a small ship can pause syncing or keep less
+::
++$  state-1
+  $:  %1
+      head=(map @tas @ud)
+      latest=@ud
+      acts=(list act)
+      queue=(list job)
+      busy=@ud
+      block-busy=?
+      scanning=(set @tas)
+      timer=(unit @da)
+      names=(map @ux (list @p))
+      checked=(set @ux)
+      unchecked=(set @ux)
+      settings=(unit @t)
+      error=@t
+      paused=?                         ::  no new requests while set
+      off=(set @tas)                   ::  collections not synced (and not stored)
+      days=@ud                         ::  history window
   ==
 +$  card  card:agent:gall
 ::  mirror of the parts of point:naive we read
@@ -62,7 +83,7 @@
 ::
 ++  rpc-url   'https://rpc.mevblocker.io'
 ++  tick      ~s60
-++  backfill  216.000          ::  ~30 days of blocks on the first sync
+++  blocks-per-day  7.200
 ++  span      9.999            ::  the node allows 10k blocks per eth_getLogs
 ++  max-busy  4
 ++  max-acts  40.000
@@ -93,7 +114,7 @@
 --
 ::
 %-  agent:dbug
-=|  state-0
+=|  state-1
 =*  state  -
 ^-  agent:gall
 =<
@@ -104,15 +125,25 @@
 ++  on-init
   ^-  (quip card _this)
   =/  t  (add now.bowl ~s2)
-  :_  this(timer `t)
-  :~  [%pass /eyre/connect %arvo %e %connect [~ /apps/remimon] dap.bowl]
+  :_  this(timer `t, days 30)
+  :~  [%pass /eyre/connect %arvo %e %connect [~ /apps/chibi] dap.bowl]
       [%pass /tick %arvo %b %wait t]
   ==
 ++  on-save  !>(state)
 ++  on-load
   |=  old=vase
   ^-  (quip card _this)
-  =.  state  !<(versioned-state old)
+  =/  old-s  !<(versioned-state old)
+  =.  state
+    ?-    -.old-s
+        %1  old-s
+        %0
+      :*  %1  head.old-s  latest.old-s  acts.old-s  queue.old-s
+          busy.old-s  block-busy.old-s  scanning.old-s  timer.old-s
+          names.old-s  checked.old-s  unchecked.old-s  settings.old-s
+          error.old-s  |  ~  30
+      ==
+    ==
   ?^  timer  `this
   =/  t  (add now.bowl ~s2)
   :_  this(timer `t)
@@ -177,12 +208,16 @@
 ::    rate-limited us), skip the chain head and come back in a few seconds
 ::
 ++  wake
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
+  ?:  paused
+    =/  t  (add now.bowl tick)
+    :_  state(timer `t)
+    [%pass /tick %arvo %b %wait t]~
   =/  backlog  ?=(^ queue)
   =/  t  (add now.bowl ?:(backlog ~s5 tick))
   =.  timer  `t
   =.  state  lookup
-  =?  acts  (gth (lent acts) max-acts)  (scag max-acts acts)
+  =.  acts  (prune acts)
   =^  c1  state  fill
   =/  c2=(list card)
     ?:  |(block-busy backlog)  ~
@@ -195,7 +230,7 @@
 ::
 ++  take
   |=  [=wire res=(unit json)]
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   ?+  wire  `state
     [%block ~]  (take-block res)
   ::
@@ -214,7 +249,7 @@
 ::
 ++  take-block
   |=  res=(unit json)
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =.  block-busy  |
   =/  n=(unit @)  ?~(res ~ (bind (str u.res) unhex))
   ?~  n  `state(error 'could not reach the ethereum node')
@@ -223,7 +258,7 @@
   scan-all
 ::
 ++  scan-all
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =|  cards=(list card)
   =/  cs  collections
   |-
@@ -235,11 +270,12 @@
 ::
 ++  scan
   |=  key=@tas
-  ^-  (quip card state-0)
-  ?:  (~(has in scanning) key)  `state
-  ?:  (lth latest (add backfill 2))  `state
+  ^-  (quip card state-1)
+  ?:  |(paused (~(has in off) key) (~(has in scanning) key))  `state
+  =/  window  (mul days blocks-per-day)
+  ?:  (lth latest (add window 2))  `state
   =/  safe  (sub latest 2)
-  =/  h  (~(gut by head) key (sub safe backfill))
+  =/  h  (~(gut by head) key (sub safe window))
   =.  head  (~(put by head) key h)
   ?:  (gte h safe)  `state
   =/  from  +(h)
@@ -259,8 +295,11 @@
 ::
 ++  take-logs
   |=  [key=@tas from=@ud to=@ud res=(unit json)]
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =.  scanning  (~(del in scanning) key)
+  ::  ignore ranges we no longer want: collection switched off, or cleared
+  ::
+  ?.  =(`(dec from) (~(get by head) key))  `state
   ?.  ?=([~ %a *] res)
     `state(error (rap 3 'log request failed for ' key ~))
   =.  queue  (weld queue (to-jobs key p.u.res))
@@ -294,9 +333,10 @@
 ::  +fill: keep up to max-busy receipt requests going
 ::
 ++  fill
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =|  cards=(list card)
   |-
+  ?:  paused  [cards state]
   ?~  queue  [cards state]
   ?:  (gte busy max-busy)  [cards state]
   =*  j  i.queue
@@ -310,9 +350,10 @@
 ::
 ++  take-receipt
   |=  [=job res=(unit json)]
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =.  busy  ?:(=(0 busy) 0 (dec busy))
   ::  failed or not found yet: try again on the next tick
+  ?:  (~(has in off) coll.job)  fill
   ?.  ?=([~ %o *] res)  `state(queue (snoc queue job))
   =/  new  (decode job (coll-addr coll.job) (parse-logs u.res))
   =.  acts
@@ -534,7 +575,7 @@
   :*  %pass  wire  %arvo  %i  %request
       :*  %'POST'  rpc-url
           :~  ['content-type' 'application/json']
-              ['user-agent' 'remimon (urbit)']
+              ['user-agent' 'chibi (urbit)']
           ==
           `(as-octs:mimes:html body)
       ==
@@ -573,14 +614,14 @@
 ::
 ++  handle
   |=  [eyre-id=@ta req=inbound-request:eyre]
-  ^-  (quip card state-0)
+  ^-  (quip card state-1)
   =/  give  (cury give-simple-payload:app:server eyre-id)
   =/  rl  (parse-request-line:server url.request.req)
   ?.  authenticated.req
-    ?:  ?=([%apps %remimon %api *] site.rl)  [(give [[403 ~] ~]) state]
+    ?:  ?=([%apps %chibi %api *] site.rl)  [(give [[403 ~] ~]) state]
     [(give (login-redirect:gen:server request.req)) state]
   =/  site=(list @t)
-    ?.(?=([%apps %remimon *] site.rl) ~ t.t.site.rl)
+    ?.(?=([%apps %chibi *] site.rl) ~ t.t.site.rl)
   =*  method  method.request.req
   ?+    site  [(give not-found:gen:server) state]
       ~           [(give (ok 'text/html' (file /web/index/html))) state]
@@ -598,6 +639,13 @@
     =/  hits  (scag 1.000 (skim acts (matcher q)))
     [(give (json-response:gen:server a+(turn hits act-json))) state]
   ::
+      [%api %control ~]
+    ?.  ?=(%'POST' method)  [(give [[405 ~] ~]) state]
+    =/  j  ?~(body.request.req ~ (de:json:html q.u.body.request.req))
+    ?~  j  [(give [[400 ~] ~]) state]
+    =^  cards  state  (control (fall (str (field u.j 'action')) '') u.j)
+    [(weld cards (give (json-response:gen:server state-json))) state]
+  ::
       [%api %settings ~]
     ?.  ?=(%'POST' method)  [(give [[405 ~] ~]) state]
     ?~  body.request.req  [(give [[400 ~] ~]) state]
@@ -605,6 +653,64 @@
     ?~  (de:json:html q.u.body.request.req)  [(give [[400 ~] ~]) state]
     [(give [[204 ~] ~]) state(settings `q.u.body.request.req)]
   ==
+::
+::
+::  +control: pause, resume, clear, toggle a collection, set the window
+::
+++  control
+  |=  [action=@t j=json]
+  ^-  (quip card state-1)
+  ?+    action  `state
+      %pause  `state(paused &)
+  ::
+      %resume
+    ?.  paused  `state
+    =.  paused  |
+    =^  cards  state  fill
+    ?:  block-busy  [cards state]
+    [[(rpc /rpc/block 'eth_blockNumber' a+~) cards] state(block-busy &)]
+  ::
+      %clear
+    :-  ~
+    %=  state
+      acts       ~
+      head       ~
+      queue      ~
+      names      ~
+      checked    ~
+      unchecked  ~
+      error      ''
+    ==
+  ::
+      %toggle
+    =/  c  (str (field j 'coll'))
+    ?~  c  `state
+    =/  k=@tas  `@tas`u.c
+    ?.  (lien collections |=([k2=@tas *] =(k2 k)))  `state
+    ?:  (~(has in off) k)  `state(off (~(del in off) k))
+    :-  ~
+    %=  state
+      off    (~(put in off) k)
+      head   (~(del by head) k)
+      acts   (skip acts |=(a=act =(coll.a k)))
+      queue  (skip queue |=(q=job =(coll.q k)))
+    ==
+  ::
+      %days
+    =/  d  (num (field j 'days'))
+    ?~  d  `state
+    ?.  &((gte u.d 1) (lte u.d 90))  `state
+    =.  days  u.d
+    `state(acts (prune acts))
+  ==
+::
+::  +prune: keep the history window, and never more than max-acts
+::
+++  prune
+  |=  l=(list act)
+  ^-  (list act)
+  =/  cut  (sub now.bowl (mul days ~d1))
+  (skip (scag max-acts l) |=(a=act (lth at.a cut)))
 ::
 ++  matcher
   |=  q=@t
@@ -641,6 +747,11 @@
   ^-  json
   ?.  ?=([%o *] j)  ~
   (fall (~(get by p.j) k) ~)
+++  num
+  |=  j=json
+  ^-  (unit @ud)
+  ?.  ?=([%n *] j)  ~
+  (rush p.j dem)
 ++  str
   |=  j=json
   ^-  (unit @t)
@@ -671,7 +782,12 @@
   %-  pairs
   :~  ship+s+(scot %p our.bowl)
       latest+(numb latest)
-      backfill+(numb backfill)
+      backfill+(numb (mul days blocks-per-day))
+      days+(numb days)
+      paused+b+paused
+      off+a+(turn ~(tap in off) |=(k=@tas s+k))
+      events+(numb (lent acts))
+      wallets+(numb ~(wyt in checked))
       heads+(pairs (turn ~(tap by head) |=([k=@tas v=@ud] [k (numb v)])))
       queue+(numb (lent queue))
       busy+(numb busy)
@@ -680,7 +796,7 @@
       :-  %a
       %+  turn  collections
       |=  [k=@tas n=@t a=@ux]
-      (pairs ~[key+s+k name+s+n addr+s+(hexs 40 a)])
+      (pairs ~[key+s+k name+s+n addr+s+(hexs 40 a) on+b+!(~(has in off) k)])
       acts+a+(turn (scag 1.200 acts) act-json)
       :-  %sales
       :-  %a

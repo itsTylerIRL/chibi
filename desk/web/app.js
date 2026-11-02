@@ -1,7 +1,7 @@
 'use strict';
-// remimon: live on-chain activity for Remilia collections, served by the %remimon agent.
+// chibi: live on-chain activity for Remilia collections, served by the %chibi agent.
 
-const API = '/apps/remimon/api';
+const API = '/apps/chibi/api';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -44,16 +44,16 @@ let kind = load('kind', 'all');
 let settings = { watch: [], below: {} };
 let lastSeen = +load('lastSeen', 0);
 
-function load(k, d) { try { const v = localStorage.getItem('remimon.' + k); return v == null ? d : v; } catch { return d; } }
-function save(k, v) { try { localStorage.setItem('remimon.' + k, v); } catch {} }
+function load(k, d) { try { const v = localStorage.getItem('chibi.' + k); return v == null ? d : v; } catch { return d; } }
+function save(k, v) { try { localStorage.setItem('chibi.' + k, v); } catch {} }
 
 // ---------------------------------------------------------------- formatting
 
-const collName = (c) => c === 'all' ? 'All collections' : (S?.collections.find((x) => x.key === c)?.name) || c;
+const collName = (c) => c === 'all' ? 'All collections' : (S?.allCollections.find((x) => x.key === c)?.name) || c;
 // shorter names where space is tight (header pills, All-view tiles)
 const SHORT = { schizo: 'Schizo' };
 const shortName = (c) => SHORT[c] || collName(c);
-const collAddr = (c) => S?.collections.find((x) => x.key === c)?.addr;
+const collAddr = (c) => S?.allCollections.find((x) => x.key === c)?.addr;
 const fmtEth = (e) => e >= 100 ? e.toFixed(0) : e >= 10 ? e.toFixed(1) : e >= 1 ? e.toFixed(2) : e.toFixed(3);
 const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
 function ago(ms) {
@@ -102,7 +102,8 @@ async function resolveImg(c, id) {
   imgPending.delete(k);
 }
 const imgAttr = (c, id) => `src="${img(c, id)}" data-img="${c}:${id}"`;
-const collColor = (c) => COLL_COLORS[Math.max(0, (S?.collections || []).findIndex((x) => x.key === c)) % COLL_COLORS.length];
+// color follows the collection, so switching one off doesn't repaint the rest
+const collColor = (c) => COLL_COLORS[Math.max(0, (S?.allCollections || []).findIndex((x) => x.key === c)) % COLL_COLORS.length];
 
 // ---------------------------------------------------------------- data
 
@@ -111,6 +112,8 @@ async function refresh() {
     const r = await fetch(API + '/state', { credentials: 'include' });
     if (!r.ok) throw new Error(r.status);
     S = await r.json();
+    S.allCollections = S.collections;
+    S.collections = S.collections.filter((c) => c.on !== false);
   } catch (e) {
     $('sync').innerHTML = `<i class="dot bad"></i>can't reach your ship`;
     return;
@@ -181,11 +184,14 @@ function renderSync() {
   const start = S.latest - S.backfill;
   const pct = heads.length ? Math.min(...heads.map((h) => (h - start) / S.backfill)) : 0;
   let txt, cls = '';
-  if (S.error && !heads.length) { txt = S.error; cls = 'bad'; }
+  if (S.paused) { txt = 'sync paused'; cls = 'off'; }
+  else if (!S.collections.length) { txt = 'every collection is off'; cls = 'off'; }
+  else if (S.error && !heads.length) { txt = S.error; cls = 'bad'; }
   else if (behind > 50) { txt = `syncing history ${Math.floor(pct * 100)}%`; cls = 'busy'; }
   else if (S.queue > 0) { txt = `reading ${S.queue} transactions`; cls = 'busy'; }
   else txt = `live · block ${S.latest.toLocaleString()}`;
-  $('sync').innerHTML = `<i class="dot ${cls}"></i>${esc(txt)}`;
+  $('sync').innerHTML = `<i class="dot ${cls}"></i>${esc(txt)}<span class="gear" aria-hidden="true">⚙</span>`;
+  if (!$('drawer').hidden && $('dbody').dataset.panel === 'control') renderControl();
   $('sync').title = S.error || '';
 }
 
@@ -303,7 +309,12 @@ function renderVolume() {
   const bins = Array.from({ length: n }, (_, i) => ({ t: start + i * step, v: Object.fromEntries(keys.map((k) => [k, 0])), c: Object.fromEntries(keys.map((k) => [k, 0])) }));
   for (const s of sales) { const i = Math.floor((s.at - start) / step); if (i >= 0 && i < n && s.coll in bins[i].v) { bins[i].v[s.coll] += s.eth; bins[i].c[s.coll]++; } }
   const tot = (b) => keys.reduce((t, k) => t + b.v[k], 0);
-  const max = Math.max(0.0001, ...bins.map(tot));
+  if (!bins.some(tot)) {
+    $('legend').innerHTML = ''; svg.innerHTML = ''; pts = []; bars = [];
+    $('chartnote').textContent = S.queue || S.paused ? 'No sales in this range yet. History is still syncing.' : 'No sales in this range.';
+    return;
+  }
+  const max = Math.max(...bins.map(tot));
   $('legend').innerHTML = S.collections.map((c) => `<span><i style="background:${collColor(c.key)}"></i>${esc(c.name)}</span>`).join('');
   const L = 52, R = 10, T = 8, B = 22;
   const ticks = niceTicks(0, max * 1.05, 4), hi = Math.max(max * 1.05, ticks.at(-1));
@@ -443,8 +454,8 @@ async function find(q) {
   const r = await fetch(API + '/find?q=' + encodeURIComponent(q), { credentials: 'include' });
   return r.ok ? (await r.json()).map(A) : [];
 }
-function openDrawer(html) { $('dbody').innerHTML = html; $('drawer').hidden = false; $('dclose').focus(); }
-function closeDrawer() { $('drawer').hidden = true; }
+function openDrawer(html) { delete $('dbody').dataset.panel; $('dbody').innerHTML = html; $('drawer').hidden = false; $('dclose').focus(); }
+function closeDrawer() { $('drawer').hidden = true; delete $('dbody').dataset.panel; }
 
 async function openToken(c, id) {
   const w = { t: 'token', c, id };
@@ -492,6 +503,59 @@ async function openShip(p) {
     <div style="margin-top:8px"><button data-watch='${JSON.stringify({ t: 'ship', p })}'>${isWatched({ t: 'ship', p }) ? '★ Watching' : '☆ Watch'}</button></div></div></div>`);
 }
 
+// ---------------------------------------------------------------- sync controls
+
+async function control(body) {
+  try {
+    const r = await fetch(API + '/control', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) { S = await r.json(); S.allCollections = S.collections; S.collections = S.collections.filter((c) => c.on !== false);
+      acts = S.acts.map(A); sales = S.sales.map(A).sort((a, b) => a.at - b.at); render(); }
+  } catch {}
+  renderControl();
+}
+function openControl() { openDrawer(''); $('dbody').dataset.panel = 'control'; renderControl(); }
+function renderControl() {
+  if (!S || $('dbody').dataset.panel !== 'control') return;
+  const kb = Math.round(S.events * 0.25);   // rough: a stored event is ~250 bytes on the loom
+  const size = kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB';
+  const count = (k) => sales.filter((s) => s.coll === k).length;
+  const status = S.paused ? 'Paused. Nothing is being fetched; stored history stays.' :
+    S.queue ? `Syncing: ${S.queue} transactions left to read.` : `Live: checking for new blocks every minute (block ${S.latest.toLocaleString()}).`;
+  $('dbody').innerHTML = `<h3 id="dtitle" class="ctitle">Sync &amp; storage</h3>
+    <p class="note" style="margin:0 0 14px">chibi reads Ethereum through a public node and keeps what it finds on your ship. Use these to pause it, or to keep less if your ship is short on memory.</p>
+    <div class="cbox">
+      <div class="crow"><div><b>${S.paused ? 'Paused' : 'Running'}</b><div class="note">${esc(status)}</div></div>
+        <button id="cpause" class="${S.paused ? 'primary' : ''}">${S.paused ? '▶ Resume' : '❚❚ Pause'}</button></div>
+      <div class="cstats"><div><b>${S.events.toLocaleString()}</b>events stored</div><div><b>~${size}</b>approx. size</div><div><b>${S.wallets.toLocaleString()}</b>wallets checked for @p</div></div>
+    </div>
+    <h2 class="chead">Collections</h2>
+    <p class="note">Switching one off stops syncing it and deletes its stored history. Switching it back on re-reads the window.</p>
+    <div class="cbox">${S.allCollections.map((c) => `<label class="crow toggle"><span><i class="cdot" style="background:${collColor(c.key)}"></i><b>${esc(c.name)}</b> <span class="note">${c.on ? count(c.key) + ' sales stored' : 'off'}</span></span>
+      <input type="checkbox" role="switch" data-toggle="${c.key}" ${c.on ? 'checked' : ''}></label>`).join('')}</div>
+    <h2 class="chead">History window</h2>
+    <p class="note">Older events are deleted. A shorter window frees memory right away; a longer one only reaches back for collections switched on later, or after a clear.</p>
+    <div class="seg" id="cdays">${[7, 14, 30, 60].map((d) => `<button data-days="${d}" class="${S.days === d ? 'on' : ''}">${d} days</button>`).join('')}</div>
+    <h2 class="chead">Reset</h2>
+    <div class="cbox"><div class="crow"><div><b>Clear all data</b><div class="note">Deletes every stored event and @p match, then syncs the window again from scratch${S.paused ? ' when you resume' : ''}.</div></div>
+      <button id="cclear" class="danger">Clear</button></div></div>`;
+  $('cpause').onclick = () => control({ action: S.paused ? 'resume' : 'pause' });
+  $('dbody').querySelectorAll('[data-toggle]').forEach((el) => {
+    el.onchange = () => {
+      const c = S.allCollections.find((x) => x.key === el.dataset.toggle);
+      if (c.on && !confirm(`Stop syncing ${c.name} and delete its stored history?`)) { el.checked = true; return; }
+      control({ action: 'toggle', coll: c.key });
+    };
+  });
+  $('dbody').querySelectorAll('[data-days]').forEach((el) => {
+    el.onclick = () => {
+      const d = +el.dataset.days;
+      if (d < S.days && !confirm(`Delete events older than ${d} days?`)) return;
+      control({ action: 'days', days: d });
+    };
+  });
+  $('cclear').onclick = () => { if (confirm('Delete all stored chibi data and sync again from scratch?')) control({ action: 'clear' }); };
+}
+
 // ---------------------------------------------------------------- events
 
 document.addEventListener('click', (ev) => {
@@ -507,6 +571,7 @@ document.addEventListener('click', (ev) => {
   if (t.dataset.k) { kind = t.dataset.k; save('kind', kind); renderFeed(); return; }
 });
 $('dclose').onclick = closeDrawer;
+$('sync').onclick = openControl;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 $('search').onsubmit = (e) => {
   e.preventDefault();
@@ -528,3 +593,9 @@ let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTime
 refresh();
 setInterval(refresh, 20000);
 setInterval(() => { if (S) { renderStats(); renderSync(); } }, 15000);
+
+// a token image that fails to load falls back to the empty placeholder box
+document.addEventListener('error', (e) => {
+  const t = e.target;
+  if (t.tagName === 'IMG' && t.getAttribute('src')) t.setAttribute('src', '');
+}, true);
