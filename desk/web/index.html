@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>remimon</title>
+  <link rel="icon" type="image/png" href="/apps/remimon/icon">
+  <link rel="stylesheet" href="/apps/remimon/style">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/apps/remimon"><img src="/apps/remimon/icon" alt="" width="30" height="30"><span>remimon</span></a>
+    <nav id="colls" class="colls" aria-label="Collection"></nav>
+    <form id="search" class="search" autocomplete="off">
+      <input id="q" placeholder="token #, 0x address or ~ship" spellcheck="false" aria-label="Search activity">
+    </form>
+    <span id="sync" class="sync"></span>
+  </header>
+
+  <main class="grid">
+    <section id="stats" class="stats" aria-label="Collection stats"></section>
+
+    <section class="card chartcard">
+      <div class="cardhead">
+        <h2 id="charttitle">Sales</h2>
+        <div id="ranges" class="seg" role="group" aria-label="Time range">
+          <button data-r="1">24h</button><button data-r="7">7d</button><button data-r="30">30d</button>
+        </div>
+      </div>
+      <div id="legend" class="legend"></div>
+      <div id="chart" class="chart"><svg id="svg" role="img" aria-label="Sale prices over time"></svg><div id="tip" class="tip" hidden></div></div>
+      <div id="chartnote" class="note"></div>
+    </section>
+
+    <section class="card feedcard">
+      <div class="cardhead">
+        <h2>Activity</h2>
+        <div id="kinds" class="seg small" role="group" aria-label="Filter activity">
+          <button data-k="all">All</button><button data-k="sale">Sales</button><button data-k="loan">Loans</button><button data-k="move">Transfers</button><button data-k="watch">★ Watched</button>
+        </div>
+      </div>
+      <div id="feed" class="feed"></div>
+    </section>
+
+    <section class="card sidecard">
+      <div class="side1">
+        <div class="cardhead"><h2>Urbit IDs trading</h2><span id="shipct" class="note"></span></div>
+        <div id="ships" class="ships"></div>
+      </div>
+      <div class="side2">
+        <div class="cardhead"><h2>Watchlist &amp; alerts</h2></div>
+        <form id="watchform" class="watchform" autocomplete="off">
+          <input id="watchin" placeholder="#1234, 0x… or ~ship" spellcheck="false" aria-label="Add to watchlist">
+          <button type="submit">Watch</button>
+        </form>
+        <div id="watches" class="watches"></div>
+        <div class="alertrule">
+          <label>Alert on a <b id="alertcoll"></b> sale under <input id="below" type="number" min="0" step="0.01" placeholder="—"> ETH</label>
+          <button id="notify" class="ghost">Enable notifications</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawerbox" role="dialog" aria-modal="true" aria-labelledby="dtitle">
+      <button id="dclose" class="dclose" aria-label="Close">✕</button>
+      <div id="dbody"></div>
+    </div>
+  </div>
+
+  <script src="/apps/remimon/sigil"></script>
+  <script src="/apps/remimon/app"></script>
+</body>
+</html>
