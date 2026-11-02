@@ -1,6 +1,6 @@
 :~  title+'remimon'
     info+'Live on-chain activity for Remilia collections: Milady and Remilio sales, loans and transfers.'
-    color+0x10.1010
+    color+0x10.0e14
     image+'/apps/remimon/icon'
     version+[0 1 0]
     website+'https://github.com/itsTylerIRL'
